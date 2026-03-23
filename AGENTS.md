@@ -30,9 +30,71 @@ Metrolist is a 3rd party YouTube Music client written in Kotlin. It follows mate
 7. If you have any doubts ask a human contributor. This can be done using the `askQuestions` tool if you're running in GitHub Copilot. I don't know if other agents have these type of tools.
 8. If you do not test your changes using the instructions in the next section, you will be faced with reprimands from human contributors and may be asked to redo your work. Always ensure that you test your changes thoroughly before asking for a final review.
 
+## Spotify GQL hash management
+
+The app uses Spotify's internal GraphQL API (via `api-partner.spotify.com`). Each GQL operation requires a SHA-256 hash that Spotify rotates periodically. The hashes are defined in `spotify/src/main/kotlin/com/metrolist/spotify/Spotify.kt`.
+
+### Remote hash registry
+
+A GitHub Actions workflow (`.github/workflows/spotify-hash-check.yml`) runs daily at 06:00 UTC. It:
+1. Fetches the current Spotify web player JS bundle
+2. Extracts all operation→hash mappings
+3. Compares them with `docs/spotify-gql-hashes.json`
+4. If any hash has rotated: updates the JSON (moving the old hash to `previous_hash`), commits, and deploys to GitHub Pages
+
+The live JSON is served at: `https://francescograzioso.github.io/Meld/spotify-gql-hashes.json`
+
+### JSON structure
+
+Each entry in `operations` has:
+- `hash` — the current valid SHA-256 hash
+- `previous_hash` — the last known working hash (fallback if `hash` fails with 412)
+- `status` — `verified` (found in bundle) or `not_in_bundle` (may break without warning)
+- `last_verified` / `last_changed` — timestamps
+
+### Tracked operations
+
+The JSON tracks **only the operations currently used by the app** in `Spotify.kt`. As of v0.6.0:
+
+| Operation | App function(s) |
+|---|---|
+| `profileAttributes` | Profile info |
+| `libraryV3` | `myPlaylists()`, `myArtists()` |
+| `fetchPlaylist` | `playlist()`, `playlistTracks()` |
+| `fetchLibraryTracks` | `likedSongs()` |
+| `searchDesktop` | `search()` |
+| `queryArtistOverview` | `artist()`, `artistTopTracks()`, `artistRelatedArtists()` |
+| `getAlbum` | `album()` |
+| `queryWhatsNewFeed` | `whatsNewFeed()` |
+| `addToPlaylist` | `addToPlaylist()` |
+| `removeFromPlaylist` | `removeFromPlaylist()` |
+| `moveItemsInPlaylist` | `moveItemsInPlaylist()` |
+| `editPlaylistAttributes` | `editPlaylistAttributes()` |
+| `addToLibrary` | `addToLibrary()` — sync likes |
+| `removeFromLibrary` | `removeFromLibrary()` — sync likes |
+
+### When adding new GQL operations
+
+If you add a new GQL operation to `Spotify.kt`, you **must** also add a corresponding entry in `docs/spotify-gql-hashes.json` so the daily checker tracks it. The entry format is:
+```json
+"operationName": {
+  "hash": "<the 64-char sha256 hash you're using>",
+  "previous_hash": null,
+  "type": "query or mutation",
+  "status": "verified",
+  "last_verified": "<current ISO timestamp>",
+  "last_changed": null
+}
+```
+
+### Reference documents
+
+- `SPOTIFY_GQL_REFERENCE.md` — full documentation of all known GQL endpoints, variables, and hash history (excluded from git)
+- `.github/scripts/check_spotify_hashes.py` — the hash checker script
+
 ## Building and testing your changes
 
-1. After making changes to the code, you should build the app to ensure that there are no compilation errors. Use the following command from the root directory of the project:
+1. After making changes to the code, you should build the app to ensure that there are no compilation errors. Use the following command from the root directory of the project. Before building  ask the user if it's necessary or if he will build and test:
 
 ```bash
 ./gradlew :app:assembleuniversalFossDebug
