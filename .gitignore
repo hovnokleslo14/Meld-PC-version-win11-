@@ -109,7 +109,5 @@ app/src/main/cpp/vibrafp/third_party/.build-fftw/
 .build-fftw
 app/src/main/cpp/coverart/
 
-# Internal development notes
-ROADMAP_NOTES.md
+# Internal development notes (moved to notes/ submodule)
 .spotify_gql_endpoints.json
-SPOTIFY_GQL_REFERENCE.md
