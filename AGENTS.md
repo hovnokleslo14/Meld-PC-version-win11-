@@ -89,8 +89,23 @@ If you add a new GQL operation to `Spotify.kt`, you **must** also add a correspo
 
 ### Reference documents
 
-- `SPOTIFY_GQL_REFERENCE.md` — full documentation of all known GQL endpoints, variables, and hash history (excluded from git)
+- `notes/SPOTIFY_GQL_REFERENCE.md` — full documentation of all known GQL endpoints, variables, and hash history (private submodule, see below)
 - `.github/scripts/check_spotify_hashes.py` — the hash checker script
+
+## Private notes submodule
+
+The `notes/` directory is a git submodule pointing to a private repository (`FrancescoGrazioso/meld-notes`). It contains:
+
+- `ROADMAP_NOTES.md` — internal development roadmap and planning notes
+- `SPOTIFY_GQL_REFERENCE.md` — full reference for all known Spotify GQL endpoints
+
+The submodule is not populated by default when cloning. To access its contents (requires repo access):
+
+```bash
+git submodule update --init
+```
+
+If you do not have access to the private repo, the `notes/` directory will be empty. This is expected — do not attempt to recreate or modify its contents.
 
 ## Building and testing your changes
 
