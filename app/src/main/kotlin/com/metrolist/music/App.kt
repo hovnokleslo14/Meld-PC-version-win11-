@@ -10,6 +10,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
 import android.os.Build
+import android.os.StrictMode
 import android.widget.Toast
 import androidx.datastore.preferences.core.edit
 import coil3.ImageLoader
@@ -17,10 +18,14 @@ import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import coil3.disk.directory
+import coil3.intercept.Interceptor
 import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
+import coil3.request.ErrorResult
+import coil3.request.ImageResult
 import coil3.request.allowHardware
 import coil3.request.crossfade
+import kotlin.coroutines.cancellation.CancellationException
 import com.metrolist.innertube.YouTube
 import com.metrolist.innertube.models.YouTubeLocale
 import com.metrolist.kugou.KuGou
@@ -32,11 +37,14 @@ import com.metrolist.music.constants.*
 import com.metrolist.music.di.ApplicationScope
 import com.metrolist.music.extensions.toEnum
 import com.metrolist.music.extensions.toInetSocketAddress
+import com.metrolist.music.utils.AnrWatchdog
 import com.metrolist.music.utils.CrashHandler
+import com.metrolist.music.utils.CrashReporter
 import com.metrolist.music.utils.SpotifyHashSync
 import com.metrolist.music.utils.SpotifyTokenManager
 import com.metrolist.music.utils.cipher.CipherDeobfuscator
 import com.metrolist.music.utils.dataStore
+import com.metrolist.music.utils.installPreferencesSnapshotCollector
 import com.metrolist.music.utils.reportException
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -66,13 +74,44 @@ class App :
     override fun onCreate() {
         super.onCreate()
 
-        // Install crash handler first
+        if (BuildConfig.DEBUG) {
+            // Logs main-thread disk/network I/O and leaked resources to logcat so ANR
+            // regressions are visible while developing. penaltyLog() only — never death,
+            // to avoid crashing developers on pre-existing violations while we migrate
+            // away from blocking DataStore reads.
+            StrictMode.setThreadPolicy(
+                StrictMode.ThreadPolicy.Builder()
+                    .detectDiskReads()
+                    .detectDiskWrites()
+                    .detectNetwork()
+                    .penaltyLog()
+                    .build()
+            )
+            StrictMode.setVmPolicy(
+                StrictMode.VmPolicy.Builder()
+                    .detectLeakedClosableObjects()
+                    .detectLeakedRegistrationObjects()
+                    .penaltyLog()
+                    .build()
+            )
+        }
+
+        // Install crash handler first. CrashReporter must be initialized before
+        // CrashHandler so the uncaught-exception path can post to GitHub Issues.
+        CrashReporter.init(this)
         CrashHandler.install(this)
+        AnrWatchdog.start()
 
         // Initialize cipher deobfuscator for WEB_REMIX streaming
         CipherDeobfuscator.initialize(this)
 
         Timber.plant(Timber.DebugTree())
+
+        // Start mirroring DataStore into an in-memory snapshot so subsequent synchronous
+        // `dataStore.get(...)` calls (used in Composables and Service lifecycle) don't
+        // hit disk. Kicked off before any other initialization so the snapshot is
+        // populated as early as possible.
+        installPreferencesSnapshotCollector(applicationScope, dataStore)
 
         // تهيئة إعدادات التطبيق عند الإقلاع
         applicationScope.launch {
@@ -270,6 +309,9 @@ class App :
         return ImageLoader
             .Builder(this)
             .apply {
+                components {
+                    add(CrashSafeInterceptor)
+                }
                 crossfade(true)
                 allowHardware(Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
                 // Memory cache for fast image loading (prevents network requests on recomposition)
@@ -293,6 +335,18 @@ class App :
                     networkCachePolicy(CachePolicy.ENABLED)
                 }
             }.build()
+    }
+
+    private object CrashSafeInterceptor : Interceptor {
+        override suspend fun intercept(chain: Interceptor.Chain): ImageResult =
+            try {
+                chain.proceed()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Throwable) {
+                Timber.w(e, "Coil image load failed; swallowing to prevent app crash")
+                ErrorResult(image = null, request = chain.request, throwable = e)
+            }
     }
 
     companion object {

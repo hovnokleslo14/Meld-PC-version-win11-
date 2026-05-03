@@ -185,8 +185,15 @@ constructor(
                             serializeSections(AndroidAutoSection.values().map { it to true })
                         )
                         val sections = deserializeSections(sectionsRaw)
+                        val spotifyLoggedIn = Spotify.isAuthenticated()
                         sections
-                            .filter { (_, enabled) -> enabled }
+                            .filter { (section, enabled) ->
+                                enabled && when (section) {
+                                    AndroidAutoSection.SPOTIFY_LIKED,
+                                    AndroidAutoSection.SPOTIFY_PLAYLISTS -> spotifyLoggedIn
+                                    else -> true
+                                }
+                            }
                             .ifEmpty { listOf(AndroidAutoSection.LIKED to true) }
                             .map { (section, _) ->
                                 when (section) {
@@ -223,6 +230,20 @@ constructor(
                                         context.getString(R.string.playlists),
                                         null,
                                         drawableUri(R.drawable.queue_music),
+                                        MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
+                                    )
+                                    AndroidAutoSection.SPOTIFY_LIKED -> browsableMediaItem(
+                                        "${MusicService.SPOTIFY_PLAYLIST}/liked_songs",
+                                        context.getString(R.string.spotify_liked_songs),
+                                        null,
+                                        drawableUri(R.drawable.favorite),
+                                        MediaMetadata.MEDIA_TYPE_PLAYLIST,
+                                    )
+                                    AndroidAutoSection.SPOTIFY_PLAYLISTS -> browsableMediaItem(
+                                        MusicService.SPOTIFY_PLAYLIST,
+                                        context.getString(R.string.spotify_playlists),
+                                        null,
+                                        drawableUri(R.drawable.spotify),
                                         MediaMetadata.MEDIA_TYPE_FOLDER_PLAYLISTS,
                                     )
                                 }
@@ -316,6 +337,8 @@ constructor(
                         }
                         localItems + fetchSpotifyPlaylistItems()
                     }
+
+                    MusicService.SPOTIFY_PLAYLIST -> fetchSpotifyPlaylistItems()
 
                     else ->
                         when {

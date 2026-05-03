@@ -37,6 +37,7 @@ import com.metrolist.music.ui.screens.playlist.LocalPlaylistScreen
 import com.metrolist.music.ui.screens.playlist.OnlinePlaylistScreen
 import com.metrolist.music.ui.screens.playlist.SpotifyLikedSongsScreen
 import com.metrolist.music.ui.screens.album.SpotifyAlbumScreen
+import com.metrolist.music.ui.screens.library.SpotifyFolderScreen
 import com.metrolist.music.ui.screens.playlist.SpotifyPlaylistScreen
 import com.metrolist.music.ui.screens.playlist.TopPlaylistScreen
 import com.metrolist.music.ui.screens.podcast.OnlinePodcastScreen
@@ -53,6 +54,7 @@ import com.metrolist.music.ui.screens.settings.ContentSettings
 import com.metrolist.music.ui.screens.settings.DarkMode
 import com.metrolist.music.ui.screens.settings.DiscordLoginScreen
 import com.metrolist.music.ui.screens.settings.PlayerSettings
+import com.metrolist.music.ui.screens.settings.SponsorBlockSettings
 import com.metrolist.music.ui.screens.settings.PrivacySettings
 import com.metrolist.music.ui.screens.settings.RomanizationSettings
 import com.metrolist.music.ui.screens.settings.SettingsScreen
@@ -390,6 +392,10 @@ fun NavGraphBuilder.navigationBuilder(
         PlayerSettings(navController)
     }
 
+    composable("settings/player/sponsorblock") {
+        SponsorBlockSettings(navController)
+    }
+
     composable("settings/storage") {
         StorageSettings(navController)
     }
@@ -454,6 +460,27 @@ fun NavGraphBuilder.navigationBuilder(
 
     composable("spotify_liked_songs") {
         SpotifyLikedSongsScreen(navController, scrollBehavior)
+    }
+
+    composable(
+        route = "spotify_folder/{folderUri}?name={name}",
+        arguments = listOf(
+            navArgument("folderUri") { type = NavType.StringType },
+            navArgument("name") {
+                type = NavType.StringType
+                nullable = true
+                defaultValue = null
+            },
+        ),
+    ) { backStack ->
+        val rawUri = backStack.arguments?.getString("folderUri").orEmpty()
+        val rawName = backStack.arguments?.getString("name")
+        // Both args were URL-encoded by the caller (URI contains ':' and '/'; name
+        // can contain spaces or unicode). Decode here so we hand the unmodified
+        // values to the API and the AppBar.
+        val folderUri = java.net.URLDecoder.decode(rawUri, Charsets.UTF_8.name())
+        val folderName = rawName?.let { java.net.URLDecoder.decode(it, Charsets.UTF_8.name()) }
+        SpotifyFolderScreen(navController, folderUri, folderName)
     }
 
     composable("settings/discord/login") {

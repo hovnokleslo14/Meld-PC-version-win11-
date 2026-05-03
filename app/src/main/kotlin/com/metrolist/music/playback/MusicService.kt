@@ -122,6 +122,10 @@ import com.metrolist.music.constants.MediaSessionConstants.CommandToggleShuffle
 import com.metrolist.music.constants.MediaSessionConstants.CommandToggleStartRadio
 import com.metrolist.music.constants.PauseListenHistoryKey
 import com.metrolist.music.constants.PauseOnMute
+import com.metrolist.music.constants.SPONSORBLOCK_DEFAULT_CATEGORIES
+import com.metrolist.music.constants.SponsorBlockCategoriesKey
+import com.metrolist.music.constants.SponsorBlockEnabledKey
+import com.metrolist.music.constants.SponsorBlockShowToastKey
 import com.metrolist.music.constants.PersistentQueueKey
 import com.metrolist.music.constants.PersistentShuffleAcrossQueuesKey
 import com.metrolist.music.constants.PlayerVolumeKey
@@ -212,6 +216,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.plus
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
 import okhttp3.OkHttpClient
 import timber.log.Timber
 import java.io.ObjectInputStream
@@ -272,6 +278,10 @@ class MusicService :
     private var crossfadeDuration = 5000f
     private var crossfadeGapless = true
     private var crossfadeTriggerJob: Job? = null
+
+    // SponsorBlock: per-track job that fetches skip segments and polls playback
+    // position to seek past them. Cancelled and restarted on every track change.
+    private var sponsorBlockJob: Job? = null
 
     private val secondaryPlayerListener =
         object : Player.Listener {
@@ -667,8 +677,11 @@ class MusicService :
                     // Clear cached URL to force fresh fetch
                     songUrlCache.remove(mediaId)
 
-                    // CRITICAL: Clear caches synchronously to prevent format parsing errors
-                    runBlocking(Dispatchers.IO) {
+                    // Clear caches before reload so the new quality isn't served a stale
+                    // byte-range. Using withContext(IO) instead of runBlocking keeps this
+                    // sequential with the reload below, without blocking the main thread
+                    // (this collector is suspending, we can safely suspend here).
+                    withContext(Dispatchers.IO) {
                         try {
                             playerCache.removeResource(mediaId)
                             downloadCache.removeResource(mediaId)
@@ -2123,6 +2136,9 @@ class MusicService :
 
         discordUpdateJob?.cancel()
 
+        // Restart SponsorBlock for the new track (no-op when disabled).
+        startSponsorBlockForCurrentTrack()
+
         scrobbleManager?.onSongStop()
         if (player.playWhenReady && player.playbackState == Player.STATE_READY) {
             scrobbleManager?.onSongStart(player.currentMetadata, duration = player.duration)
@@ -2527,6 +2543,50 @@ class MusicService :
         }
     }
 
+    /**
+     * Transient YouTube responses where the player response is missing critical
+     * data (expire time, format, stream URL, or empty player response). Treated
+     * like an expired URL: refresh caches and retry rather than crashing.
+     */
+    private fun isMissingStreamDataError(error: PlaybackException): Boolean {
+        val keywords =
+            listOf(
+                "missing stream expire time",
+                "could not find format",
+                "could not find stream url",
+                "bad stream player response",
+            )
+        var cause: Throwable? = error
+        while (cause != null) {
+            val message = cause.message?.lowercase()
+            if (message != null && keywords.any { message.contains(it) }) {
+                return true
+            }
+            cause = cause.cause
+        }
+        return false
+    }
+
+    /**
+     * Transient MediaCodec decoder failures (e.g. opus decoder dropping a frame).
+     * These are not actionable for the user and recover by re-initializing the
+     * audio renderer.
+     */
+    private fun isMediaCodecError(error: PlaybackException): Boolean {
+        if (error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED
+        ) {
+            return true
+        }
+        var cause: Throwable? = error.cause
+        while (cause != null) {
+            if (cause is android.media.MediaCodec.CodecException) return true
+            cause = cause.cause
+        }
+        return false
+    }
+
     private fun isNetworkRelatedError(error: PlaybackException): Boolean {
         // Don't treat specific errors as network errors - they need special handling
         if (isExpiredUrlError(error) || isRangeNotSatisfiableError(error) || isPageReloadError(error)) {
@@ -2563,7 +2623,16 @@ class MusicService :
         Timber
             .tag(TAG)
             .w(error, "Player error occurred for $mediaId: errorCode=${error.errorCode}, message=${error.message}")
-        reportException(error)
+
+        // Transient YouTube CDN / decoder errors are auto-recovered; skip crash reporting.
+        val isRecoverableYouTubeError = isRangeNotSatisfiableError(error) ||
+            isExpiredUrlError(error) ||
+            isPageReloadError(error) ||
+            isMissingStreamDataError(error) ||
+            isMediaCodecError(error)
+        if (!isRecoverableYouTubeError) {
+            reportException(error)
+        }
 
         // Check if this song has failed too many times
         if (mediaId != null && hasExceededRetryLimit(mediaId)) {
@@ -2601,6 +2670,18 @@ class MusicService :
             isExpiredUrlError(error) -> {
                 Timber.tag(TAG).d("Expired URL (403) detected, refreshing stream URL")
                 handleExpiredUrlError(mediaId)
+                return
+            }
+
+            isMissingStreamDataError(error) -> {
+                Timber.tag(TAG).d("Missing stream data from YouTube, refreshing stream URL")
+                handleExpiredUrlError(mediaId)
+                return
+            }
+
+            isMediaCodecError(error) -> {
+                Timber.tag(TAG).d("MediaCodec decoder error detected, performing renderer recovery")
+                handleAudioRendererError(mediaId)
                 return
             }
 
@@ -2773,18 +2854,20 @@ class MusicService :
         retryJob?.cancel()
         retryJob =
             scope.launch {
-                // Clear all caches aggressively
                 performAggressiveCacheClear(mediaId)
-
-                // Wait before retry
                 delay(RETRY_DELAY_MS)
 
-                // Force re-prepare from position 0 to avoid range issues
                 val currentIndex = player.currentMediaItemIndex
-                player.seekTo(currentIndex, 0)
+                val currentPosition = player.currentPosition
+                if (currentIndex == C.INDEX_UNSET) {
+                    handleFinalFailure()
+                    return@launch
+                }
+                // Resume from the same position — the resolver will fetch a fresh URL.
+                player.seekTo(currentIndex, currentPosition)
                 player.prepare()
 
-                Timber.tag(TAG).d("Retrying playback for $mediaId after 416 error (from position 0)")
+                Timber.tag(TAG).d("Retrying playback for $mediaId after 416 error at position $currentPosition")
             }
     }
 
@@ -3247,11 +3330,20 @@ class MusicService :
             Timber.tag("MusicService").i("FETCHING STREAM: $mediaId | quality=$audioQuality")
             val playbackData =
                 runBlocking(Dispatchers.IO) {
-                    YTPlayerUtils.playerResponseForPlayback(
-                        mediaId,
-                        audioQuality = audioQuality,
-                        connectivityManager = connectivityManager,
-                    )
+                    // Hard cap on stream resolution so a stuck YouTube/PoToken/NewPipe
+                    // call can't keep a song "loading" forever. ExoPlayer surfaces the
+                    // PlaybackException to the user as a skip-able error.
+                    try {
+                        withTimeout(30_000L) {
+                            YTPlayerUtils.playerResponseForPlayback(
+                                mediaId,
+                                audioQuality = audioQuality,
+                                connectivityManager = connectivityManager,
+                            )
+                        }
+                    } catch (e: TimeoutCancellationException) {
+                        Result.failure(java.net.SocketTimeoutException("Stream resolution timed out"))
+                    }
                 }.getOrElse { throwable ->
                     when (throwable) {
                         is PlaybackException -> {
@@ -3327,7 +3419,7 @@ class MusicService :
 
                 songUrlCache[mediaId] =
                     streamUrl to System.currentTimeMillis() + (nonNullPlayback.streamExpiresInSeconds * 1000L)
-                return@Factory dataSpec.withUri(streamUrl.toUri()).subrange(dataSpec.uriPositionOffset, CHUNK_LENGTH)
+                return@Factory dataSpec.withUri(streamUrl.toUri()).subrange(0, CHUNK_LENGTH)
             }
         }
     }
@@ -3525,6 +3617,7 @@ class MusicService :
         // But since we are destroying the service, it's fine.
         player.release()
         discordUpdateJob?.cancel()
+        sponsorBlockJob?.cancel()
         scope.cancel()
         super.onDestroy()
     }
@@ -3777,6 +3870,62 @@ class MusicService :
     ) {
         if (reason == Player.DISCONTINUITY_REASON_SEEK) {
             scheduleCrossfade()
+        }
+    }
+
+    /**
+     * Restarts the SponsorBlock segment-skipper for the currently-playing track.
+     * Cancels any previous job, then (if enabled) launches a coroutine that
+     * fetches segments and polls playback position to seek past them. Failures
+     * are silent — SponsorBlock should never disrupt playback.
+     */
+    private fun startSponsorBlockForCurrentTrack() {
+        sponsorBlockJob?.cancel()
+        sponsorBlockJob = null
+
+        val enabled = dataStore.get(SponsorBlockEnabledKey, false)
+        if (!enabled) return
+
+        val rawCategories = dataStore.get(SponsorBlockCategoriesKey, SPONSORBLOCK_DEFAULT_CATEGORIES)
+        val categories = rawCategories.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        if (categories.isEmpty()) return
+
+        val mediaId = player.currentMediaItem?.mediaId ?: return
+        // Episodes (podcasts) are not on YouTube proper and aren't on SponsorBlock.
+        if (player.currentMediaItem?.metadata?.isEpisode == true) return
+
+        val showToast = dataStore.get(SponsorBlockShowToastKey, false)
+
+        sponsorBlockJob = scope.launch {
+            val segments = withContext(Dispatchers.IO) {
+                runCatching { SponsorBlockManager.fetchSegments(mediaId, categories) }
+                    .getOrDefault(emptyList())
+            }
+            if (segments.isEmpty()) return@launch
+            // Verify track hasn't changed during the fetch.
+            if (player.currentMediaItem?.mediaId != mediaId) return@launch
+
+            while (isActive && player.currentMediaItem?.mediaId == mediaId) {
+                val pos = player.currentPosition
+                segments.forEach { segment ->
+                    if (pos in segment.startMs..(segment.endMs - 200)) {
+                        Timber.tag(TAG).d(
+                            "SponsorBlock: skipping ${segment.category} ${segment.startMs}..${segment.endMs}ms"
+                        )
+                        // Hop straight past the segment. seekTo is idempotent
+                        // so re-entering the segment (manual rewind) re-triggers.
+                        player.seekTo(segment.endMs)
+                        if (showToast) {
+                            Toast.makeText(
+                                this@MusicService,
+                                getString(R.string.sponsorblock_segment_skipped, segment.category),
+                                Toast.LENGTH_SHORT,
+                            ).show()
+                        }
+                    }
+                }
+                delay(250)
+            }
         }
     }
 

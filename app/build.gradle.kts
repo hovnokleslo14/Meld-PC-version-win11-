@@ -33,8 +33,8 @@ android {
         applicationId = applicationIdOverride ?: "com.meld.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "0.6.7"
+        versionCode = 16
+        versionName = "0.7.1"
         resValue("string", "app_name", appNameOverride ?: "Meld")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -47,6 +47,16 @@ android {
         buildConfigField("String", "LASTFM_API_KEY", "\"$lastFmKey\"")
         buildConfigField("String", "LASTFM_SECRET", "\"$lastFmSecret\"")
         buildConfigField("String", "ARCHITECTURE", "\"universal\"")
+
+        // Crash reporting target: GitHub repo (owner/name) where Issues are created,
+        // and a fine-grained PAT with issues:write scoped to that repo only.
+        // Both must be present at build time for reporting to be active at runtime.
+        val crashRepo = localProperties.getProperty("CRASH_REPORT_REPO")
+            ?: System.getenv("CRASH_REPORT_REPO") ?: "francescograzioso/Meld"
+        val crashToken = localProperties.getProperty("CRASH_REPORT_TOKEN")
+            ?: System.getenv("CRASH_REPORT_TOKEN") ?: ""
+        buildConfigField("String", "CRASH_REPORT_REPO", "\"$crashRepo\"")
+        buildConfigField("String", "CRASH_REPORT_TOKEN", "\"$crashToken\"")
     }
 
     flavorDimensions += listOf("variant")
@@ -293,4 +303,6 @@ dependencies {
     coreLibraryDesugaring(libs.desugaring)
 
     implementation(libs.timber)
+
+    testImplementation(libs.junit)
 }
