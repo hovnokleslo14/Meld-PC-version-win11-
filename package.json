@@ -1,0 +1,30 @@
+{
+  "name": "meld-pc",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "desktop:update": "neu update",
+    "desktop:run": "neu run",
+    "desktop:build": "npm run build && neu build",
+    "release:zip": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-release.ps1"
+  },
+  "devDependencies": {
+    "@neutralinojs/neu": "^11.7.1",
+    "@playwright/test": "^1.60.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "typescript": "~6.0.2",
+    "vite": "^8.0.12"
+  },
+  "dependencies": {
+    "@neutralinojs/lib": "^6.7.0",
+    "lucide-react": "^1.14.0",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6"
+  }
+}
