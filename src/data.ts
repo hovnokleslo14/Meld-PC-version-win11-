@@ -281,9 +281,13 @@ export const seedPlaylists: Playlist[] = [
 export const defaultSettings: SettingsState = {
   spotifyConnected: false,
   spotifyClientId: "",
+  spotifyClientSecret: "",
+  spotifyAccessToken: "",
+  youtubeApiKey: "",
   youtubeEndpoint: "https://music.youtube.com",
   spotifyForHome: true,
   spotifyForSearch: true,
+  youtubeForSearch: true,
   discordPresence: true,
   reduceMotion: false,
   normalizeAudio: true,

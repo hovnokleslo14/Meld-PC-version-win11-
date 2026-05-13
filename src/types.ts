@@ -7,7 +7,9 @@ export type Track = {
   album: string;
   duration: number;
   source: Provider;
-  audioUrl: string;
+  audioUrl?: string;
+  thumbnail?: string;
+  videoId?: string;
   spotifyUrl?: string;
   youtubeUrl?: string;
   cover: string;
@@ -31,10 +33,16 @@ export type NavView = "Home" | "Search" | "Library" | "Radio" | "Lyrics" | "Sett
 export type SettingsState = {
   spotifyConnected: boolean;
   spotifyClientId: string;
+  spotifyClientSecret: string;
+  spotifyAccessToken: string;
+  youtubeApiKey: string;
   youtubeEndpoint: string;
   spotifyForHome: boolean;
   spotifyForSearch: boolean;
+  youtubeForSearch: boolean;
   discordPresence: boolean;
   reduceMotion: boolean;
   normalizeAudio: boolean;
 };
+
+export type SearchSource = "all" | "youtube" | "spotify" | "local";

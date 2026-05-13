@@ -1,24 +1,39 @@
 # Meld PC
 
-Meld PC is a Windows desktop music client inspired by the Android project [Meld](https://github.com/FrancescoGrazioso/Meld). This repository is not an Android app and does not build an APK. It is a PC version for Windows 11.
+**Meld PC is a WINDOWS desktop app. It is not an Android app and it does not build an APK.**
 
-The app is built with React, Vite, and Neutralinojs instead of Electron so it can use the native WebView runtime and keep memory usage lower.
+This project is a Windows 11 music client inspired by the Android project [Meld](https://github.com/FrancescoGrazioso/Meld), rebuilt for PC with React, Vite, and Neutralinojs instead of Electron. Neutralino uses the native WebView runtime and a small native host, so the app stays much lighter than an Electron build.
 
 ## Features
 
-- 5-second Discord-style animated loading screen on every launch
-- Modern Windows desktop UI with Home, Search, Library, Radio, Lyrics, Settings, and Queue views
-- Working audio player with play, pause, next, previous, shuffle, repeat, seek, volume, queue editing, and animated visualizer
-- Demo Spotify-source and YouTube-match metadata
+- Single-file Windows installer: `Meld-PC-Setup-v1.1.0.exe`
+- 5-second animated splash screen on every launch
+- Modern Windows UI with Home, Search, Library, Radio, Lyrics, Settings, Queue, and video preview
+- YouTube Music search through the official YouTube Data API
+- Spotify catalog search through the official Spotify Web API
+- Album/video thumbnails from YouTube and Spotify results
+- YouTube video preview in the queue panel for YouTube results
 - Local audio import through the Windows file picker
-- Liked tracks, playlist playback, search, lyrics view, and provider settings
-- Neutralino desktop wrapper for a small Windows build without Electron
+- Play, pause, next, previous, shuffle, repeat, seek, volume, queue editing, liked tracks, and animated visualizer
 
-## Important
+## Online Search Setup
 
-This project does not contain the original Android Meld code. It is a separate Windows implementation with a similar idea and UI direction.
+Online providers need your own API credentials. The app cannot safely ship hidden Spotify or YouTube keys inside a public desktop executable.
 
-Real Spotify API login requires your own Spotify Client ID. YouTube Music matching opens/searches YouTube Music links and uses demo playback URLs unless you wire your own backend/provider integration.
+YouTube Music search:
+
+1. Create or use a Google Cloud project.
+2. Enable YouTube Data API v3.
+3. Create an API key.
+4. Paste it in `Settings -> YouTube Music Search`.
+
+Spotify search:
+
+1. Create a Spotify developer app.
+2. Paste the Client ID and Client Secret in `Settings -> Spotify Search`.
+3. You can also paste a temporary Bearer access token instead.
+
+Local demo tracks and local file import work without credentials.
 
 ## Development
 
@@ -40,15 +55,15 @@ The static app is written to `dist/`.
 ```bash
 npm run desktop:update
 npm run desktop:build
-npm run release:zip
+npm run release:exe
 ```
 
-The Windows release archive is created at:
+The Windows installer is created at:
 
 ```text
-release/Meld-PC-Windows-v1.0.0.zip
+release/Meld-PC-Setup-v1.1.0.exe
 ```
 
 ## Why Not Electron
 
-Electron ships a full Chromium runtime per app. Meld PC uses Neutralinojs, which wraps the system WebView and a tiny native host. That keeps the app much lighter for a music player interface.
+Electron ships a full Chromium runtime per app. Meld PC uses Neutralinojs, which wraps the system WebView and a tiny native host. That keeps the app lighter for a music player interface.

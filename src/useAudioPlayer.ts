@@ -52,6 +52,15 @@ export function useAudioPlayer(initialQueue: Track[]) {
     const audioElement = audioRef.current;
     if (!audioElement || !currentTrack) return;
 
+    if (!currentTrack.audioUrl) {
+      audioElement.pause();
+      audioElement.removeAttribute("src");
+      audioElement.load();
+      setPosition(0);
+      setDuration(currentTrack.duration || 0);
+      return;
+    }
+
     if (audioElement.src !== currentTrack.audioUrl) {
       audioElement.src = currentTrack.audioUrl;
       audioElement.currentTime = 0;
@@ -73,6 +82,7 @@ export function useAudioPlayer(initialQueue: Track[]) {
     setQueue((items) => (items.some((item) => item.id === track.id) ? items : [track, ...items]));
     setCurrentId(track.id);
     setIsPlaying(true);
+    if (!track.audioUrl) return;
     queueMicrotask(() => {
       void audioRef.current?.play().catch(() => setIsPlaying(false));
     });
@@ -81,6 +91,11 @@ export function useAudioPlayer(initialQueue: Track[]) {
   const togglePlay = useCallback(() => {
     const audioElement = audioRef.current;
     if (!audioElement || !currentTrack) return;
+
+    if (!currentTrack.audioUrl) {
+      setIsPlaying((value) => !value);
+      return;
+    }
 
     if (isPlaying) {
       audioElement.pause();
@@ -143,6 +158,7 @@ export function useAudioPlayer(initialQueue: Track[]) {
     if (playFirst && tracks[0]) {
       setCurrentId(tracks[0].id);
       setIsPlaying(true);
+      if (!tracks[0].audioUrl) return;
       queueMicrotask(() => {
         void audioRef.current?.play().catch(() => setIsPlaying(false));
       });
