@@ -26,6 +26,7 @@ export type Playlist = {
   source: Provider;
   tracks: string[];
   cover: string;
+  thumbnail?: string;
 };
 
 export type NavView = "Home" | "Search" | "Library" | "Radio" | "Lyrics" | "Settings";
@@ -41,6 +42,9 @@ export type SettingsState = {
   spotifyForSearch: boolean;
   youtubeForSearch: boolean;
   discordPresence: boolean;
+  discordClientId: string;
+  onboardingComplete: boolean;
+  autoLoadLibrary: boolean;
   reduceMotion: boolean;
   normalizeAudio: boolean;
 };

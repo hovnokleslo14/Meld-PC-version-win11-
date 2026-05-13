@@ -289,6 +289,9 @@ export const defaultSettings: SettingsState = {
   spotifyForSearch: true,
   youtubeForSearch: true,
   discordPresence: true,
+  discordClientId: "",
+  onboardingComplete: false,
+  autoLoadLibrary: true,
   reduceMotion: false,
   normalizeAudio: true,
 };

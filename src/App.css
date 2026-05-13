@@ -128,7 +128,44 @@
 .app-shell {
   display: grid;
   grid-template-columns: 244px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) 118px;
+  grid-template-rows: 44px minmax(0, 1fr) 118px;
+}
+
+.titlebar {
+  position: relative;
+  z-index: 3;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  height: 44px;
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(3, 6, 8, 0.86);
+  backdrop-filter: blur(26px);
+  user-select: none;
+}
+
+.titlebar-brand {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 10px;
+}
+
+.titlebar-brand strong {
+  color: #fff;
+  letter-spacing: 0;
+}
+
+.titlebar-brand > span {
+  overflow: hidden;
+  max-width: 220px;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sidebar,
@@ -139,6 +176,7 @@
 }
 
 .sidebar {
+  grid-row: 2;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -179,6 +217,10 @@
 .brand-mark.xl span:nth-child(1) { height: 34px; }
 .brand-mark.xl span:nth-child(2) { height: 58px; }
 .brand-mark.xl span:nth-child(3) { height: 42px; }
+.brand-mark.mini span { width: 4px; }
+.brand-mark.mini span:nth-child(1) { height: 12px; }
+.brand-mark.mini span:nth-child(2) { height: 20px; }
+.brand-mark.mini span:nth-child(3) { height: 15px; }
 
 .nav-list {
   display: grid;
@@ -312,6 +354,11 @@ button {
   background: rgba(255, 255, 255, 0.055);
 }
 
+.secondary:disabled {
+  opacity: 0.48;
+  cursor: not-allowed;
+}
+
 .secondary.small {
   min-height: 32px;
   padding: 0 10px;
@@ -330,6 +377,29 @@ button {
   color: #d1d8df;
 }
 
+.window-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.window-controls .window-control {
+  width: 36px;
+  height: 30px;
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.window-controls .window-control:hover {
+  border-color: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.window-controls .window-control.close:hover {
+  color: #fff;
+  border-color: rgba(255, 95, 87, 0.65);
+  background: rgba(255, 95, 87, 0.85);
+}
+
 .primary:hover:not(:disabled),
 .secondary:hover,
 .icon-button:hover,
@@ -345,6 +415,7 @@ button {
 .source.local { color: var(--blue); }
 
 .main-area {
+  grid-row: 2;
   display: grid;
   min-width: 0;
   grid-template-rows: 72px minmax(0, 1fr);
@@ -352,16 +423,21 @@ button {
 
 .topbar {
   display: grid;
-  grid-template-columns: auto minmax(260px, 720px) auto auto;
+  grid-template-columns: auto minmax(260px, 720px) auto;
   align-items: center;
   gap: 14px;
   padding: 14px 18px 10px 28px;
 }
 
 .history-buttons,
-.window-controls {
+.header-actions {
   display: flex;
   gap: 7px;
+}
+
+.header-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .top-search,
@@ -562,6 +638,14 @@ p {
   border-radius: 8px;
 }
 
+.playlist-art img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .playlist-art::after {
   content: "";
   position: absolute;
@@ -571,6 +655,12 @@ p {
     repeating-linear-gradient(115deg, transparent 0 14px, rgba(255, 255, 255, 0.08) 15px 17px);
   transform: translateX(-28%);
   animation: waveSweep 5.4s ease-in-out infinite;
+}
+
+.playlist-art:has(img)::after {
+  background:
+    linear-gradient(180deg, transparent 20%, rgba(0, 0, 0, 0.62)),
+    linear-gradient(115deg, transparent 10%, rgba(255, 255, 255, 0.12) 35%, transparent 50%);
 }
 
 .playlist-art .source {
@@ -757,6 +847,84 @@ p {
   background: rgba(255, 95, 87, 0.08);
 }
 
+.onboarding-panel,
+.status-badge,
+.discord-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.055);
+}
+
+.onboarding-panel {
+  padding: 16px;
+}
+
+.onboarding-panel svg {
+  color: var(--green);
+}
+
+.onboarding-panel div {
+  display: grid;
+  gap: 3px;
+}
+
+.onboarding-panel strong,
+.status-badge strong {
+  color: #fff;
+}
+
+.onboarding-panel span,
+.status-badge small,
+.discord-status span {
+  color: var(--muted);
+}
+
+.status-badge {
+  align-items: start;
+  padding: 12px;
+}
+
+.status-badge > span {
+  width: 10px;
+  height: 10px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.08);
+}
+
+.status-badge.ready > span {
+  background: var(--green);
+  box-shadow: 0 0 18px rgba(67, 255, 112, 0.52);
+}
+
+.status-badge.loading > span {
+  background: var(--blue);
+  animation: pulseDot 1s ease-in-out infinite;
+}
+
+.status-badge.error > span {
+  background: var(--coral);
+}
+
+.status-badge small {
+  display: block;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.discord-status {
+  min-height: 42px;
+  padding: 0 12px;
+}
+
+.discord-status.enabled svg {
+  color: var(--green);
+}
+
 .empty-state {
   display: grid;
   justify-items: start;
@@ -906,6 +1074,7 @@ p {
 .player-bar {
   z-index: 2;
   grid-column: 1 / -1;
+  grid-row: 3;
   display: grid;
   grid-template-columns: minmax(250px, 360px) minmax(360px, 1fr) minmax(230px, 400px);
   align-items: center;
@@ -1118,6 +1287,12 @@ input[type="range"]::-webkit-slider-thumb {
   from { height: 8px; }
   to { height: 52px; }
 }
+@keyframes pulseDot {
+  50% {
+    transform: scale(1.45);
+    opacity: 0.65;
+  }
+}
 
 @media (max-width: 1180px) {
   .app-shell {
@@ -1167,7 +1342,7 @@ input[type="range"]::-webkit-slider-thumb {
 @media (max-width: 840px) {
   .app-shell {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(0, 1fr) 132px;
+    grid-template-rows: 44px minmax(0, 1fr) 132px;
   }
 
   .sidebar {

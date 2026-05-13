@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/neutralinojs/neutralinojs/main/schemas/neutralino.config.schema.json",
   "applicationId": "cz.meldpc.windows",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "defaultMode": "window",
   "port": 0,
   "documentRoot": "/dist/",
@@ -13,7 +13,7 @@
     "enabled": false,
     "writeToLogFile": false
   },
-  "nativeAllowList": ["app.*", "os.open", "window.*", "events.*", "debug.log"],
+  "nativeAllowList": ["app.*", "os.open", "os.execCommand", "window.*", "events.*", "debug.log"],
   "modes": {
     "window": {
       "title": "Meld PC",
@@ -26,7 +26,7 @@
       "alwaysOnTop": false,
       "icon": "/dist/favicon.svg",
       "enableInspector": false,
-      "borderless": false,
+      "borderless": true,
       "maximize": false,
       "hidden": false,
       "resizable": true,

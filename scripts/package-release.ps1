@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$version = "1.1.0"
+$version = "1.2.0"
 $releaseDir = Join-Path $root "release"
 $stageDir = Join-Path $releaseDir "installer-staging"
 $artifact = Join-Path $releaseDir "Meld-PC-Setup-v$version.exe"
@@ -11,6 +11,7 @@ $binary = Join-Path $desktopDir "Meld-PC-win_x64.exe"
 $resources = Join-Path $desktopDir "resources.neu"
 $readme = Join-Path $root "README.md"
 $installerScript = Join-Path $root "scripts\install.ps1"
+$discordRpcScript = Join-Path $root "scripts\discord-rpc.ps1"
 
 if (!(Test-Path $binary)) {
   throw "Missing Neutralino binary. Run npm run desktop:build first."
@@ -24,6 +25,10 @@ if (!(Test-Path $installerScript)) {
   throw "Missing installer script at $installerScript."
 }
 
+if (!(Test-Path $discordRpcScript)) {
+  throw "Missing Discord RPC script at $discordRpcScript."
+}
+
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
 if (Test-Path $stageDir) {
   Remove-Item -LiteralPath $stageDir -Recurse -Force
@@ -34,6 +39,7 @@ Copy-Item -LiteralPath $binary -Destination (Join-Path $stageDir "Meld-PC-win_x6
 Copy-Item -LiteralPath $resources -Destination (Join-Path $stageDir "resources.neu") -Force
 Copy-Item -LiteralPath $readme -Destination (Join-Path $stageDir "README.md") -Force
 Copy-Item -LiteralPath $installerScript -Destination (Join-Path $stageDir "install.ps1") -Force
+Copy-Item -LiteralPath $discordRpcScript -Destination (Join-Path $stageDir "discord-rpc.ps1") -Force
 
 if (Test-Path $artifact) {
   Remove-Item -LiteralPath $artifact -Force
@@ -74,6 +80,7 @@ SourceFiles0=$stageForSed
 Meld-PC-win_x64.exe=
 resources.neu=
 install.ps1=
+discord-rpc.ps1=
 README.md=
 "@
 

@@ -6,13 +6,17 @@ This project is a Windows 11 music client inspired by the Android project [Meld]
 
 ## Features
 
-- Single-file Windows installer: `Meld-PC-Setup-v1.1.0.exe`
+- Single-file Windows installer: `Meld-PC-Setup-v1.2.0.exe`
 - 5-second animated splash screen on every launch
+- Custom Windows title bar with working minimize, maximize, drag, and close controls
+- First-launch setup flow that opens Settings so API keys can be added before syncing
 - Modern Windows UI with Home, Search, Library, Radio, Lyrics, Settings, Queue, and video preview
 - YouTube Music search through the official YouTube Data API
 - Spotify catalog search through the official Spotify Web API
 - Album/video thumbnails from YouTube and Spotify results
 - YouTube video preview in the queue panel for YouTube results
+- Real provider library sync for Home and Library after credentials are configured
+- Discord Splash / Rich Presence bridge for showing the current track and playback timeline in Discord
 - Local audio import through the Windows file picker
 - Play, pause, next, previous, shuffle, repeat, seek, volume, queue editing, liked tracks, and animated visualizer
 
@@ -31,7 +35,14 @@ Spotify search:
 
 1. Create a Spotify developer app.
 2. Paste the Client ID and Client Secret in `Settings -> Spotify Search`.
-3. You can also paste a temporary Bearer access token instead.
+3. You can also paste a Bearer user access token instead. User playlist loading needs playlist scopes; Client Credentials only supports catalog search.
+
+Discord Splash:
+
+1. Create a Discord Developer application.
+2. Paste its Application Client ID in `Settings -> Discord Splash`.
+3. Enable the Discord Splash toggle.
+4. Start playing a song while the Discord desktop client is running.
 
 Local demo tracks and local file import work without credentials.
 
@@ -61,7 +72,7 @@ npm run release:exe
 The Windows installer is created at:
 
 ```text
-release/Meld-PC-Setup-v1.1.0.exe
+release/Meld-PC-Setup-v1.2.0.exe
 ```
 
 ## Why Not Electron

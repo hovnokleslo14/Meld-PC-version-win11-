@@ -37,8 +37,18 @@ import {
 } from "lucide-react";
 import { type ChangeEvent, type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { seedPlaylists, seedTracks } from "./data";
-import { desktopWindow, isNeutralino, openExternal } from "./desktop";
-import { loadSettings, saveSettings, searchOnline } from "./services";
+import { clearDiscordPresence, desktopWindow, isNeutralino, openExternal, sendDiscordPresence } from "./desktop";
+import {
+  hasAnyProviderCredentials,
+  hasSpotifyCredentials,
+  hasYouTubeCredentials,
+  loadProviderLibrary,
+  loadSettings,
+  providerKey,
+  saveSettings,
+  searchOnline,
+  type ProviderLoadState,
+} from "./services";
 import { useAudioPlayer } from "./useAudioPlayer";
 import type { NavView, Playlist, SearchSource, SettingsState, Track } from "./types";
 import "./App.css";
@@ -64,6 +74,42 @@ const providerLabel = (source: Track["source"]) => {
   if (source === "youtube") return "YT Music";
   return "Local";
 };
+
+type ProviderStatuses = Record<"spotify" | "youtube", ProviderLoadState>;
+
+const makeProviderStatuses = (settings: SettingsState): ProviderStatuses => ({
+  spotify: {
+    configured: hasSpotifyCredentials(settings),
+    status: hasSpotifyCredentials(settings) ? "ready" : "missing",
+    message: hasSpotifyCredentials(settings) ? "Spotify configured" : "Needs Spotify credentials",
+    tracks: 0,
+    playlists: 0,
+  },
+  youtube: {
+    configured: hasYouTubeCredentials(settings),
+    status: hasYouTubeCredentials(settings) ? "ready" : "missing",
+    message: hasYouTubeCredentials(settings) ? "YouTube configured" : "Needs YouTube API key",
+    tracks: 0,
+    playlists: 0,
+  },
+});
+
+function statusLabel(status: ProviderLoadState["status"]) {
+  if (status === "ready") return "Ready";
+  if (status === "loading") return "Loading";
+  if (status === "error") return "Error";
+  return "Missing";
+}
+
+function dedupeTrackList(tracks: Track[]) {
+  const seen = new Set<string>();
+  return tracks.filter((track) => {
+    const key = track.videoId ? `youtube-${track.videoId}` : track.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 function SplashScreen() {
   const steps = useMemo(() => ["Starting WebView", "Preparing search providers", "Loading artwork cache", "Opening Meld PC"], []);
@@ -117,10 +163,29 @@ function WindowControls() {
   if (!isNeutralino()) return null;
   return (
     <div className="window-controls">
-      <button aria-label="Minimize" onClick={desktopWindow.minimize}><Minimize2 size={15} /></button>
-      <button aria-label="Maximize" onClick={() => void desktopWindow.toggleMaximize()}><Maximize2 size={15} /></button>
-      <button aria-label="Close" onClick={desktopWindow.close}><X size={16} /></button>
+      <button className="window-control" aria-label="Minimize" onClick={desktopWindow.minimize}><Minimize2 size={15} /></button>
+      <button className="window-control" aria-label="Maximize" onClick={() => void desktopWindow.toggleMaximize()}><Maximize2 size={15} /></button>
+      <button className="window-control close" aria-label="Close" onClick={desktopWindow.close}><X size={16} /></button>
     </div>
+  );
+}
+
+function TitleBar({ status }: { status: string }) {
+  return (
+    <header
+      className="titlebar"
+      onMouseDown={(event) => {
+        if (event.button !== 0 || (event.target as HTMLElement).closest("button")) return;
+        desktopWindow.beginDrag(event.screenX, event.screenY);
+      }}
+    >
+      <div className="titlebar-brand">
+        <div className="brand-mark mini"><span /><span /><span /></div>
+        <strong>Meld PC</strong>
+        <span>{status}</span>
+      </div>
+      <WindowControls />
+    </header>
   );
 }
 
@@ -128,11 +193,13 @@ function Sidebar({
   activeView,
   setActiveView,
   settings,
+  providerStatus,
   onConnect,
 }: {
   activeView: NavView;
   setActiveView: (view: NavView) => void;
   settings: SettingsState;
+  providerStatus: ProviderStatuses;
   onConnect: () => void;
 }) {
   const spotifyReady = settings.spotifyAccessToken || (settings.spotifyClientId && settings.spotifyClientSecret);
@@ -160,11 +227,11 @@ function Sidebar({
       <div className="provider-status">
         <div>
           <Disc3 size={26} className="source spotify" />
-          <span><strong>Spotify</strong>{spotifyReady ? "Search enabled" : "Needs credentials"}</span>
+          <span><strong>Spotify</strong>{providerStatus.spotify.message}</span>
         </div>
         <div>
           <Play size={26} className="source youtube" />
-          <span><strong>YT Music</strong>{settings.youtubeApiKey ? "Search enabled" : "Needs API key"}</span>
+          <span><strong>YT Music</strong>{providerStatus.youtube.message}</span>
         </div>
       </div>
       <div className="sidebar-footer">
@@ -217,7 +284,10 @@ function TrackRow({
 function PlaylistCard({ playlist, tracks, onPlay }: { playlist: Playlist; tracks: Track[]; onPlay: (tracks: Track[]) => void }) {
   return (
     <button className="playlist-card" onClick={() => onPlay(tracks)}>
-      <div className="playlist-art" style={{ background: playlist.cover }}><SourceIcon source={playlist.source} /></div>
+      <div className="playlist-art" style={{ background: playlist.cover }}>
+        {playlist.thumbnail && <img src={playlist.thumbnail} alt="" loading="lazy" />}
+        <SourceIcon source={playlist.source} />
+      </div>
       <strong>{playlist.title}</strong>
       <span>{playlist.description}</span>
     </button>
@@ -227,6 +297,8 @@ function PlaylistCard({ playlist, tracks, onPlay }: { playlist: Playlist; tracks
 function HomeView({
   tracks,
   playlists,
+  libraryLoading,
+  onLoadLibrary,
   onPlay,
   onPlayMany,
   onAdd,
@@ -237,6 +309,8 @@ function HomeView({
 }: {
   tracks: Track[];
   playlists: Playlist[];
+  libraryLoading: boolean;
+  onLoadLibrary: () => void;
   onPlay: (track: Track) => void;
   onPlayMany: (tracks: Track[]) => void;
   onAdd: (track: Track) => void;
@@ -252,7 +326,10 @@ function HomeView({
           <h1>Good evening</h1>
           <p>Search YouTube Music, Spotify, and local files from one Windows app.</p>
         </div>
-        <button className="secondary" onClick={() => onPlayMany(tracks)}><Sparkles size={18} />Sync</button>
+        <button className="secondary" onClick={onLoadLibrary} disabled={libraryLoading}>
+          {libraryLoading ? <Loader2 className="spin" size={18} /> : <Sparkles size={18} />}
+          Sync library
+        </button>
       </header>
       <div className="section-head"><h2>Featured for you</h2><div className="tiny-controls"><ChevronLeft size={18} /><ChevronRight size={18} /></div></div>
       <div className="playlist-grid">
@@ -332,7 +409,7 @@ function SearchView({
   isPlaying: boolean;
 }) {
   const visibleTracks = useMemo(() => {
-    const all = [...onlineTracks, ...tracks];
+    const all = dedupeTrackList([...onlineTracks, ...tracks]);
     if (source === "all") return all;
     return all.filter((track) => track.source === source);
   }, [onlineTracks, source, tracks]);
@@ -391,6 +468,9 @@ function SearchView({
 function LibraryView({
   playlists,
   tracks,
+  libraryLoading,
+  providerStatus,
+  onLoadLibrary,
   onPlayMany,
   onImport,
   localCount,
@@ -398,6 +478,9 @@ function LibraryView({
 }: {
   playlists: Playlist[];
   tracks: Track[];
+  libraryLoading: boolean;
+  providerStatus: ProviderStatuses;
+  onLoadLibrary: () => void;
   onPlayMany: (tracks: Track[]) => void;
   onImport: (event: ChangeEvent<HTMLInputElement>) => void;
   localCount: number;
@@ -407,8 +490,14 @@ function LibraryView({
   return (
     <section className="content-stack page-enter">
       <header className="view-heading split">
-        <div><h1>Library</h1><p>{likedCount} liked tracks, {localCount} local files, queue tools.</p></div>
-        <button className="primary" onClick={() => inputRef.current?.click()}><Download size={18} />Import audio</button>
+        <div><h1>Library</h1><p>{likedCount} liked tracks, {localCount} local files, {providerStatus.youtube.tracks + providerStatus.spotify.tracks} provider tracks.</p></div>
+        <div className="header-actions">
+          <button className="secondary" onClick={onLoadLibrary} disabled={libraryLoading}>
+            {libraryLoading ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+            Refresh
+          </button>
+          <button className="primary" onClick={() => inputRef.current?.click()}><Download size={18} />Import audio</button>
+        </div>
       </header>
       <input ref={inputRef} className="hidden-input" type="file" accept="audio/*" multiple onChange={onImport} />
       <div className="library-grid">
@@ -451,42 +540,107 @@ function LyricsView({ track }: { track?: Track }) {
   );
 }
 
+function StatusBadge({ state, message }: { state: ProviderLoadState["status"]; message: string }) {
+  return (
+    <div className={`status-badge ${state}`}>
+      <span />
+      <strong>{statusLabel(state)}</strong>
+      <small>{message}</small>
+    </div>
+  );
+}
+
+function buildDiscordActivity(track: Track, isPlaying: boolean, position: number, duration: number) {
+  const now = Math.floor(Date.now() / 1000);
+  const safeDuration = duration || track.duration || 0;
+  const start = Math.max(0, now - Math.floor(position));
+  const activity = {
+    details: track.title,
+    state: `${track.artist} • ${isPlaying ? "Playing" : `Paused at ${formatTime(position)}`}`,
+    timestamps: isPlaying && safeDuration > 0
+      ? { start, end: start + Math.floor(safeDuration) }
+      : { start },
+  };
+  return activity;
+}
+
 function SettingsView({
   settings,
   setSettings,
+  providerStatus,
+  libraryLoading,
+  libraryErrors,
+  discordStatus,
+  onLoadLibrary,
   currentTrack,
 }: {
   settings: SettingsState;
   setSettings: (settings: SettingsState) => void;
+  providerStatus: ProviderStatuses;
+  libraryLoading: boolean;
+  libraryErrors: string[];
+  discordStatus: string;
+  onLoadLibrary: () => void;
   currentTrack?: Track;
 }) {
   const update = <K extends keyof SettingsState>(key: K, value: SettingsState[K]) => setSettings({ ...settings, [key]: value });
+  const needsSetup = !hasAnyProviderCredentials(settings);
   return (
     <section className="settings-view page-enter">
       <header className="view-heading">
-        <div><h1>Settings</h1><p>Online search, video thumbnails, and low-memory Windows behavior.</p></div>
+        <div><h1>Settings</h1><p>Online search, video thumbnails, playlists, and Discord presence.</p></div>
+        <button className="primary" onClick={onLoadLibrary} disabled={libraryLoading || needsSetup}>
+          {libraryLoading ? <Loader2 className="spin" size={18} /> : <RefreshCw size={18} />}
+          Load real library
+        </button>
       </header>
+      {needsSetup && (
+        <div className="onboarding-panel">
+          <Sparkles size={24} />
+          <div>
+            <strong>Finish setup first</strong>
+            <span>Add a YouTube API key and/or Spotify credentials. Meld PC will sync real playable songs after the credentials are saved.</span>
+          </div>
+        </div>
+      )}
+      {libraryErrors.length > 0 && (
+        <div className="search-errors">
+          {libraryErrors.map((error) => <span key={error}>{error}</span>)}
+        </div>
+      )}
       <div className="settings-grid">
         <div className="settings-panel">
           <h2>YouTube Music Search</h2>
+          <StatusBadge state={libraryLoading && providerStatus.youtube.configured ? "loading" : providerStatus.youtube.status} message={providerStatus.youtube.message} />
           <label>YouTube Data API key<input value={settings.youtubeApiKey} onChange={(event) => update("youtubeApiKey", event.target.value)} placeholder="AIza..." /></label>
           <div className="toggle-line"><span>Use YouTube in Search</span><input type="checkbox" checked={settings.youtubeForSearch} onChange={(event) => update("youtubeForSearch", event.target.checked)} /></div>
           <button className="secondary" onClick={() => openExternal("https://developers.google.com/youtube/v3/docs/search/list")}><ExternalLink size={18} />API docs</button>
         </div>
         <div className="settings-panel">
           <h2>Spotify Search</h2>
+          <StatusBadge state={libraryLoading && providerStatus.spotify.configured ? "loading" : providerStatus.spotify.status} message={providerStatus.spotify.message} />
           <label>Spotify Client ID<input value={settings.spotifyClientId} onChange={(event) => update("spotifyClientId", event.target.value)} placeholder="Client ID" /></label>
           <label>Spotify Client Secret<input type="password" value={settings.spotifyClientSecret} onChange={(event) => update("spotifyClientSecret", event.target.value)} placeholder="Client Secret for local catalog search" /></label>
-          <label>Spotify Access Token<input value={settings.spotifyAccessToken} onChange={(event) => update("spotifyAccessToken", event.target.value)} placeholder="Optional Bearer token instead" /></label>
+          <label>Spotify User Access Token<input value={settings.spotifyAccessToken} onChange={(event) => update("spotifyAccessToken", event.target.value)} placeholder="Optional Bearer token for playlists" /></label>
           <div className="toggle-line"><span>Use Spotify in Search</span><input type="checkbox" checked={settings.spotifyForSearch} onChange={(event) => update("spotifyForSearch", event.target.checked)} /></div>
           <button className="secondary" onClick={() => openExternal("https://developer.spotify.com/documentation/web-api/reference/search")}><ExternalLink size={18} />Search docs</button>
         </div>
         <div className="settings-panel">
-          <h2>Playback</h2>
-          <div className="toggle-line"><span>Discord Rich Presence</span><input type="checkbox" checked={settings.discordPresence} onChange={(event) => update("discordPresence", event.target.checked)} /></div>
+          <h2>Library</h2>
+          <div className="toggle-line"><span>Auto-load real library on launch</span><input type="checkbox" checked={settings.autoLoadLibrary} onChange={(event) => update("autoLoadLibrary", event.target.checked)} /></div>
           <div className="toggle-line"><span>Audio normalization</span><input type="checkbox" checked={settings.normalizeAudio} onChange={(event) => update("normalizeAudio", event.target.checked)} /></div>
           <div className="toggle-line"><span>Reduce motion</span><input type="checkbox" checked={settings.reduceMotion} onChange={(event) => update("reduceMotion", event.target.checked)} /></div>
           <button className="secondary" onClick={() => openExternal(currentTrack?.youtubeUrl ?? currentTrack?.spotifyUrl)}><ExternalLink size={18} />Open current</button>
+        </div>
+        <div className="settings-panel">
+          <h2>Discord Splash</h2>
+          <div className={`discord-status ${settings.discordPresence ? "enabled" : ""}`}>
+            <Activity size={20} />
+            <span>{discordStatus}</span>
+          </div>
+          <label>Discord Application Client ID<input value={settings.discordClientId} onChange={(event) => update("discordClientId", event.target.value)} placeholder="Application Client ID" /></label>
+          <div className="toggle-line"><span>Show current song in Discord</span><input type="checkbox" checked={settings.discordPresence} onChange={(event) => update("discordPresence", event.target.checked)} /></div>
+          <button className="secondary" onClick={() => openExternal("https://discord.com/developers/docs/topics/rpc#set-activity")}><ExternalLink size={18} />RPC docs</button>
         </div>
       </div>
     </section>
@@ -640,7 +794,8 @@ function PlayerBar({
 
 export default function App() {
   const [booting, setBooting] = useState(true);
-  const [activeView, setActiveView] = useState<NavView>("Home");
+  const [settings, setSettings] = useState<SettingsState>(() => loadSettings());
+  const [activeView, setActiveView] = useState<NavView>(() => hasAnyProviderCredentials(loadSettings()) ? "Home" : "Settings");
   const [query, setQuery] = useState("");
   const [tracks, setTracks] = useState<Track[]>(seedTracks);
   const [playlists, setPlaylists] = useState<Playlist[]>(seedPlaylists);
@@ -648,9 +803,54 @@ export default function App() {
   const [source, setSource] = useState<SearchSource>("all");
   const [searching, setSearching] = useState(false);
   const [searchErrors, setSearchErrors] = useState<string[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryErrors, setLibraryErrors] = useState<string[]>([]);
+  const [providerStatus, setProviderStatus] = useState<ProviderStatuses>(() => makeProviderStatuses(loadSettings()));
+  const [discordStatus, setDiscordStatus] = useState("Discord Splash is off");
   const [likedIds, setLikedIds] = useState<Set<string>>(() => new Set(["glimmer", "nights", "about-you"]));
-  const [settings, setSettings] = useState<SettingsState>(() => loadSettings());
+  const lastLibraryKey = useRef("");
   const player = useAudioPlayer(seedTracks.slice(0, 8));
+
+  const loadRealLibrary = async () => {
+    if (!hasAnyProviderCredentials(settings)) {
+      setActiveView("Settings");
+      setLibraryErrors(["Add a YouTube API key and/or Spotify credentials first."]);
+      setProviderStatus(makeProviderStatuses(settings));
+      return;
+    }
+
+    setLibraryLoading(true);
+    setLibraryErrors([]);
+    setProviderStatus((current) => ({
+      spotify: current.spotify.configured ? { ...current.spotify, status: "loading", message: "Loading Spotify library..." } : current.spotify,
+      youtube: current.youtube.configured ? { ...current.youtube, status: "loading", message: "Loading YouTube Music library..." } : current.youtube,
+    }));
+
+    try {
+      const result = await loadProviderLibrary(settings);
+      setProviderStatus(result.providers);
+      setLibraryErrors(result.errors);
+      if (result.tracks.length > 0) {
+        setTracks((current) => {
+          const localTracks = current.filter((track) => track.source === "local");
+          return [...result.tracks, ...localTracks];
+        });
+        setPlaylists((current) => {
+          const localPlaylist = current.find((playlist) => playlist.id === "local-imports") ?? seedPlaylists.find((playlist) => playlist.id === "local-imports");
+          return localPlaylist ? [...result.playlists, localPlaylist] : result.playlists;
+        });
+        player.replaceQueue(result.tracks.slice(0, 12), false);
+      }
+    } catch (error) {
+      setLibraryErrors([error instanceof Error ? error.message : String(error)]);
+      setProviderStatus((current) => ({
+        spotify: current.spotify.configured ? { ...current.spotify, status: "error", message: "Spotify load failed" } : current.spotify,
+        youtube: current.youtube.configured ? { ...current.youtube, status: "error", message: "YouTube load failed" } : current.youtube,
+      }));
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => setBooting(false), 5000);
@@ -661,6 +861,28 @@ export default function App() {
     saveSettings(settings);
     document.documentElement.dataset.reduceMotion = settings.reduceMotion ? "true" : "false";
   }, [settings]);
+
+  useEffect(() => {
+    setProviderStatus((current) => {
+      const next = makeProviderStatuses(settings);
+      return {
+        spotify: current.spotify.tracks || current.spotify.playlists ? { ...current.spotify, configured: next.spotify.configured } : next.spotify,
+        youtube: current.youtube.tracks || current.youtube.playlists ? { ...current.youtube, configured: next.youtube.configured } : next.youtube,
+      };
+    });
+  }, [settings.spotifyAccessToken, settings.spotifyClientId, settings.spotifyClientSecret, settings.spotifyForSearch, settings.youtubeApiKey, settings.youtubeForSearch]);
+
+  useEffect(() => {
+    if (!settings.autoLoadLibrary || !hasAnyProviderCredentials(settings)) return;
+    const key = providerKey(settings);
+    if (!key || lastLibraryKey.current === key) return;
+    const timer = window.setTimeout(() => {
+      if (lastLibraryKey.current === key) return;
+      lastLibraryKey.current = key;
+      void loadRealLibrary();
+    }, 700);
+    return () => window.clearTimeout(timer);
+  }, [settings.autoLoadLibrary, settings.spotifyAccessToken, settings.spotifyClientId, settings.spotifyClientSecret, settings.spotifyForSearch, settings.youtubeApiKey, settings.youtubeForSearch]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -678,11 +900,63 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [player]);
 
+  useEffect(() => {
+    const clientId = settings.discordClientId.trim();
+    if (!settings.discordPresence) {
+      setDiscordStatus("Discord Splash is off");
+      void clearDiscordPresence(clientId);
+      return;
+    }
+    if (!clientId) {
+      setDiscordStatus("Needs Discord Application Client ID");
+      return;
+    }
+    if (!player.currentTrack) {
+      setDiscordStatus("Waiting for a song");
+      return;
+    }
+    if (!isNeutralino()) {
+      setDiscordStatus("Discord Splash works in the installed desktop app");
+      return;
+    }
+
+    let cancelled = false;
+    setDiscordStatus("Updating Discord...");
+    void sendDiscordPresence(
+      clientId,
+      buildDiscordActivity(player.currentTrack, player.isPlaying, player.position, player.duration),
+    ).then((result) => {
+      if (cancelled) return;
+      if (result.ok) setDiscordStatus(player.isPlaying ? "Showing current song in Discord" : "Discord updated with paused song");
+      else if (result.message.includes("discord-not-running")) setDiscordStatus("Discord is not running");
+      else if (result.message.includes("discord-rpc-error")) setDiscordStatus("Discord rejected RPC. Check the Client ID and app assets.");
+      else setDiscordStatus(result.message);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    settings.discordClientId,
+    settings.discordPresence,
+    player.currentTrack?.id,
+    player.isPlaying,
+    player.duration,
+    Math.floor(player.position / 15),
+  ]);
+
   const filteredTracks = useMemo(() => {
     const needle = query.trim().toLowerCase();
     if (!needle) return tracks;
     return tracks.filter((track) => [track.title, track.artist, track.album, providerLabel(track.source)].join(" ").toLowerCase().includes(needle));
   }, [query, tracks]);
+
+  const playTrack = (track: Track) => {
+    player.playTrack(track);
+    if (!track.audioUrl && !track.videoId && (track.youtubeUrl || track.spotifyUrl)) {
+      openExternal(track.youtubeUrl ?? track.spotifyUrl);
+    }
+  };
 
   const runOnlineSearch = async () => {
     const trimmed = query.trim();
@@ -749,7 +1023,7 @@ export default function App() {
           searching={searching}
           searchErrors={searchErrors}
           onSettings={() => setActiveView("Settings")}
-          onPlay={player.playTrack}
+          onPlay={playTrack}
           onAdd={player.addToQueue}
           likedIds={likedIds}
           toggleLike={toggleLike}
@@ -759,19 +1033,20 @@ export default function App() {
       );
     }
     if (activeView === "Library") {
-      return <LibraryView playlists={playlists} tracks={tracks} onPlayMany={player.replaceQueue} onImport={importAudio} localCount={tracks.filter((track) => track.source === "local").length} likedCount={likedIds.size} />;
+      return <LibraryView playlists={playlists} tracks={tracks} libraryLoading={libraryLoading} providerStatus={providerStatus} onLoadLibrary={loadRealLibrary} onPlayMany={player.replaceQueue} onImport={importAudio} localCount={tracks.filter((track) => track.source === "local").length} likedCount={likedIds.size} />;
     }
     if (activeView === "Radio") return <RadioView tracks={tracks} onPlayMany={player.replaceQueue} />;
     if (activeView === "Lyrics") return <LyricsView track={player.currentTrack} />;
-    if (activeView === "Settings") return <SettingsView settings={settings} setSettings={setSettings} currentTrack={player.currentTrack} />;
-    return <HomeView tracks={tracks} playlists={playlists} onPlay={player.playTrack} onPlayMany={player.replaceQueue} onAdd={player.addToQueue} likedIds={likedIds} toggleLike={toggleLike} isPlaying={player.isPlaying} currentTrack={player.currentTrack} />;
+    if (activeView === "Settings") return <SettingsView settings={settings} setSettings={setSettings} providerStatus={providerStatus} libraryLoading={libraryLoading} libraryErrors={libraryErrors} discordStatus={discordStatus} onLoadLibrary={loadRealLibrary} currentTrack={player.currentTrack} />;
+    return <HomeView tracks={tracks} playlists={playlists} libraryLoading={libraryLoading} onLoadLibrary={loadRealLibrary} onPlay={playTrack} onPlayMany={player.replaceQueue} onAdd={player.addToQueue} likedIds={likedIds} toggleLike={toggleLike} isPlaying={player.isPlaying} currentTrack={player.currentTrack} />;
   })();
 
   if (booting) return <SplashScreen />;
 
   return (
     <div className="app-shell">
-      <Sidebar activeView={activeView} setActiveView={setActiveView} settings={settings} onConnect={() => setActiveView("Settings")} />
+      <TitleBar status={libraryLoading ? "Syncing providers" : hasAnyProviderCredentials(settings) ? "Ready" : "Setup required"} />
+      <Sidebar activeView={activeView} setActiveView={setActiveView} settings={settings} providerStatus={providerStatus} onConnect={() => setActiveView("Settings")} />
       <main className="main-area">
         <header className="topbar">
           <div className="history-buttons"><button aria-label="Back"><ChevronLeft size={18} /></button><button aria-label="Forward"><ChevronRight size={18} /></button></div>
@@ -781,11 +1056,10 @@ export default function App() {
             <kbd>Ctrl K</kbd>
           </label>
           <button className="secondary" onClick={() => setActiveView("Settings")}><SlidersHorizontal size={18} />Settings</button>
-          <WindowControls />
         </header>
         <div className="workspace">
           <div className="view-host">{view}</div>
-          <QueuePanel queue={player.queue} currentTrack={player.currentTrack} isPlaying={player.isPlaying} onPlay={player.playTrack} onMove={player.moveQueueItem} onRemove={player.removeFromQueue} />
+          <QueuePanel queue={player.queue} currentTrack={player.currentTrack} isPlaying={player.isPlaying} onPlay={playTrack} onMove={player.moveQueueItem} onRemove={player.removeFromQueue} />
         </div>
       </main>
       <PlayerBar track={player.currentTrack} isPlaying={player.isPlaying} position={player.position} duration={player.duration} volume={player.volume} shuffle={player.shuffle} repeat={player.repeat} togglePlay={player.togglePlay} next={player.next} previous={player.previous} seek={player.seek} setVolume={player.setVolume} setShuffle={player.setShuffle} setRepeat={player.setRepeat} liked={player.currentTrack ? likedIds.has(player.currentTrack.id) : false} onLike={() => player.currentTrack && toggleLike(player.currentTrack.id)} />
