@@ -1,9 +1,16 @@
 import { app, events, init, os, window as neuWindow } from "@neutralinojs/lib";
 
-export const isNeutralino = () => typeof window !== "undefined" && "NL_MODE" in window;
+const hasNeutralinoGlobals = () => typeof window !== "undefined" && (
+  "NL_MODE" in window ||
+  "NL_APPID" in window ||
+  "NL_OS" in window ||
+  "NL_PATH" in window
+);
+
+export const isNeutralino = () => hasNeutralinoGlobals();
 
 export function initDesktopBridge() {
-  if (!isNeutralino()) {
+  if (!hasNeutralinoGlobals()) {
     return;
   }
 
@@ -45,6 +52,7 @@ export const desktopWindow = {
   },
   close() {
     if (isNeutralino()) void app.exit(0);
+    else window.close();
   },
 };
 
@@ -77,12 +85,12 @@ function psQuote(value: string) {
 }
 
 function getDiscordRpcScriptPath() {
-  const basePath = window.NL_PATH.replace(/[\\/]$/, "");
+  const basePath = (window.NL_PATH || window.NL_CWD || ".").replace(/[\\/]$/, "");
   return `${basePath}\\discord-rpc.ps1`;
 }
 
 export async function sendDiscordPresence(clientId: string, activity: DiscordActivity) {
-  if (!isNeutralino()) {
+  if (!hasNeutralinoGlobals()) {
     return { ok: false, message: "Discord Rich Presence works in the installed desktop app." };
   }
 
@@ -106,7 +114,7 @@ export async function sendDiscordPresence(clientId: string, activity: DiscordAct
 }
 
 export async function clearDiscordPresence(clientId: string) {
-  if (!isNeutralino() || !clientId.trim()) {
+  if (!hasNeutralinoGlobals() || !clientId.trim()) {
     return;
   }
 

@@ -284,6 +284,7 @@ export const defaultSettings: SettingsState = {
   spotifyClientSecret: "",
   spotifyAccessToken: "",
   youtubeApiKey: "",
+  youtubeAccessToken: "",
   youtubeEndpoint: "https://music.youtube.com",
   spotifyForHome: true,
   spotifyForSearch: true,

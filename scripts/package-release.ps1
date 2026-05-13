@@ -1,7 +1,7 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $PSScriptRoot
-$version = "1.2.0"
+$version = "1.3.0"
 $releaseDir = Join-Path $root "release"
 $stageDir = Join-Path $releaseDir "installer-staging"
 $artifact = Join-Path $releaseDir "Meld-PC-Setup-v$version.exe"

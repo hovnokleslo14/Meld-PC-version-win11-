@@ -6,7 +6,7 @@ This project is a Windows 11 music client inspired by the Android project [Meld]
 
 ## Features
 
-- Single-file Windows installer: `Meld-PC-Setup-v1.2.0.exe`
+- Single-file Windows installer: `Meld-PC-Setup-v1.3.0.exe`
 - 5-second animated splash screen on every launch
 - Custom Windows title bar with working minimize, maximize, drag, and close controls
 - First-launch setup flow that opens Settings so API keys can be added before syncing
@@ -30,6 +30,7 @@ YouTube Music search:
 2. Enable YouTube Data API v3.
 3. Create an API key.
 4. Paste it in `Settings -> YouTube Music Search`.
+5. To load your personal YouTube/YouTube Music playlists, paste a YouTube OAuth access token with `youtube.readonly`.
 
 Spotify search:
 
@@ -72,7 +73,7 @@ npm run release:exe
 The Windows installer is created at:
 
 ```text
-release/Meld-PC-Setup-v1.2.0.exe
+release/Meld-PC-Setup-v1.3.0.exe
 ```
 
 ## Why Not Electron

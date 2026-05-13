@@ -37,6 +37,7 @@ export type SettingsState = {
   spotifyClientSecret: string;
   spotifyAccessToken: string;
   youtubeApiKey: string;
+  youtubeAccessToken: string;
   youtubeEndpoint: string;
   spotifyForHome: boolean;
   spotifyForSearch: boolean;

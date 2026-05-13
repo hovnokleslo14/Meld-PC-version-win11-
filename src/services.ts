@@ -52,6 +52,33 @@ type YouTubeVideoDetails = {
   contentDetails?: { duration?: string };
 };
 
+type YouTubePlaylist = {
+  id: string;
+  snippet: {
+    title: string;
+    description?: string;
+    thumbnails: {
+      default?: { url: string };
+      medium?: { url: string };
+      high?: { url: string };
+    };
+  };
+  contentDetails?: { itemCount?: number };
+};
+
+type YouTubePlaylistItem = {
+  snippet: {
+    title: string;
+    videoOwnerChannelTitle?: string;
+    resourceId?: { videoId?: string };
+    thumbnails: {
+      default?: { url: string };
+      medium?: { url: string };
+      high?: { url: string };
+    };
+  };
+};
+
 export type ProviderLoadState = {
   configured: boolean;
   status: "missing" | "ready" | "loading" | "error";
@@ -82,7 +109,10 @@ export function saveSettings(settings: SettingsState) {
 }
 
 export function hasYouTubeCredentials(settings: SettingsState) {
-  return settings.youtubeForSearch && settings.youtubeApiKey.trim().length > 0;
+  return settings.youtubeForSearch && (
+    settings.youtubeApiKey.trim().length > 0 ||
+    settings.youtubeAccessToken.trim().length > 0
+  );
 }
 
 export function hasSpotifyCredentials(settings: SettingsState) {
@@ -99,6 +129,7 @@ export function hasAnyProviderCredentials(settings: SettingsState) {
 export function providerKey(settings: SettingsState) {
   return [
     settings.youtubeForSearch ? settings.youtubeApiKey.trim() : "",
+    settings.youtubeForSearch ? settings.youtubeAccessToken.trim() : "",
     settings.spotifyForSearch ? settings.spotifyClientId.trim() : "",
     settings.spotifyForSearch ? settings.spotifyClientSecret.trim() : "",
     settings.spotifyForSearch ? settings.spotifyAccessToken.trim() : "",
@@ -155,6 +186,34 @@ function uniqueTracks(tracks: Track[]) {
     seen.add(key);
     return true;
   });
+}
+
+function getYouTubeToken(settings: SettingsState) {
+  return settings.youtubeAccessToken.trim();
+}
+
+function getYouTubeApiKey(settings: SettingsState) {
+  return settings.youtubeApiKey.trim();
+}
+
+async function fetchYouTubeJson<T>(url: URL, settings: SettingsState): Promise<T> {
+  const token = getYouTubeToken(settings);
+  const apiKey = getYouTubeApiKey(settings);
+  const headers: HeadersInit = {};
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  } else if (apiKey) {
+    url.searchParams.set("key", apiKey);
+  } else {
+    throw new Error("YouTube needs an API key for search or an OAuth access token for personal playlists.");
+  }
+
+  const response = await fetch(url, { headers });
+  if (!response.ok) {
+    throw new Error(`YouTube request failed (${response.status}). Check API key, OAuth token, and scopes.`);
+  }
+  return await response.json() as T;
 }
 
 async function getSpotifyToken(settings: SettingsState) {
@@ -242,14 +301,8 @@ export async function searchSpotify(query: string, settings: SettingsState): Pro
 }
 
 export async function searchYouTubeMusic(query: string, settings: SettingsState): Promise<Track[]> {
-  const apiKey = settings.youtubeApiKey.trim();
-  if (!apiKey) {
-    throw new Error("YouTube Music search needs a YouTube Data API key.");
-  }
-
   const searchUrl = new URL("https://www.googleapis.com/youtube/v3/search");
   searchUrl.search = new URLSearchParams({
-    key: apiKey,
     part: "snippet",
     type: "video",
     videoCategoryId: "10",
@@ -257,12 +310,7 @@ export async function searchYouTubeMusic(query: string, settings: SettingsState)
     q: `${query} music`,
   }).toString();
 
-  const response = await fetch(searchUrl);
-  if (!response.ok) {
-    throw new Error(`YouTube search failed (${response.status}). Check the API key/quota.`);
-  }
-
-  const payload = await response.json() as { items?: YouTubeSearchItem[] };
+  const payload = await fetchYouTubeJson<{ items?: YouTubeSearchItem[] }>(searchUrl, settings);
   const items = (payload.items ?? []).filter((item) => item.id.videoId);
   const ids = items.map((item) => item.id.videoId!).join(",");
   const durationById = new Map<string, number>();
@@ -270,16 +318,16 @@ export async function searchYouTubeMusic(query: string, settings: SettingsState)
   if (ids) {
     const detailsUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
     detailsUrl.search = new URLSearchParams({
-      key: apiKey,
       part: "contentDetails",
       id: ids,
     }).toString();
-    const detailsResponse = await fetch(detailsUrl);
-    if (detailsResponse.ok) {
-      const detailsPayload = await detailsResponse.json() as { items?: YouTubeVideoDetails[] };
+    try {
+      const detailsPayload = await fetchYouTubeJson<{ items?: YouTubeVideoDetails[] }>(detailsUrl, settings);
       for (const item of detailsPayload.items ?? []) {
         durationById.set(item.id, parseYouTubeDuration(item.contentDetails?.duration));
       }
+    } catch {
+      // Durations are useful but not critical for displaying playable results.
     }
   }
 
@@ -304,6 +352,54 @@ export async function searchYouTubeMusic(query: string, settings: SettingsState)
       lyrics: ["YouTube Music result", "Video preview loads in the right panel", "Open externally for the full YouTube Music page"],
     };
   });
+}
+
+function mapYouTubePlaylistTrack(item: YouTubePlaylistItem, playlistTitle: string, index: number): Track | undefined {
+  const videoId = item.snippet.resourceId?.videoId;
+  if (!videoId || item.snippet.title === "Private video" || item.snippet.title === "Deleted video") return undefined;
+
+  const accent = fallbackAccent(index);
+  return {
+    id: `youtube-${videoId}`,
+    title: stripHtml(item.snippet.title),
+    artist: stripHtml(item.snippet.videoOwnerChannelTitle ?? "YouTube Music"),
+    album: playlistTitle,
+    duration: 0,
+    source: "youtube",
+    thumbnail: item.snippet.thumbnails.high?.url ?? item.snippet.thumbnails.medium?.url ?? item.snippet.thumbnails.default?.url,
+    videoId,
+    youtubeUrl: `https://music.youtube.com/watch?v=${videoId}`,
+    spotifyUrl: `https://open.spotify.com/search/${encodeURIComponent(stripHtml(item.snippet.title))}`,
+    cover: coverFromAccent(accent),
+    accent,
+    bpm: 0,
+    mood: "YouTube playlist",
+    lyrics: ["Loaded from your YouTube playlists", "Video preview loads in the right panel", "Open externally for YouTube Music"],
+  };
+}
+
+async function hydrateYouTubeDurations(tracks: Track[], settings: SettingsState) {
+  const ids = tracks.map((track) => track.videoId).filter(Boolean).join(",");
+  if (!ids) return tracks;
+
+  try {
+    const detailsUrl = new URL("https://www.googleapis.com/youtube/v3/videos");
+    detailsUrl.search = new URLSearchParams({
+      part: "contentDetails",
+      id: ids,
+    }).toString();
+    const detailsPayload = await fetchYouTubeJson<{ items?: YouTubeVideoDetails[] }>(detailsUrl, settings);
+    const durationById = new Map<string, number>();
+    for (const item of detailsPayload.items ?? []) {
+      durationById.set(item.id, parseYouTubeDuration(item.contentDetails?.duration));
+    }
+    return tracks.map((track) => ({
+      ...track,
+      duration: track.videoId ? durationById.get(track.videoId) ?? track.duration : track.duration,
+    }));
+  } catch {
+    return tracks;
+  }
 }
 
 async function addYouTubeMatches(tracks: Track[], settings: SettingsState) {
@@ -381,6 +477,66 @@ async function fetchSpotifyUserPlaylists(settings: SettingsState) {
       cover: playlistCover("spotify", index),
       thumbnail: playlist.images?.[0]?.url,
     });
+  }));
+
+  return { tracks, playlists, errors: [] as string[] };
+}
+
+async function fetchYouTubeUserPlaylists(settings: SettingsState) {
+  const token = getYouTubeToken(settings);
+  if (!token) return { tracks: [] as Track[], playlists: [] as Playlist[], errors: [] as string[] };
+
+  const playlistsUrl = new URL("https://www.googleapis.com/youtube/v3/playlists");
+  playlistsUrl.search = new URLSearchParams({
+    part: "snippet,contentDetails",
+    mine: "true",
+    maxResults: "8",
+  }).toString();
+
+  let payload: { items?: YouTubePlaylist[] };
+  try {
+    payload = await fetchYouTubeJson<{ items?: YouTubePlaylist[] }>(playlistsUrl, settings);
+  } catch (error) {
+    return {
+      tracks: [] as Track[],
+      playlists: [] as Playlist[],
+      errors: [error instanceof Error ? `YouTube personal playlists need an OAuth token with youtube.readonly (${error.message})` : String(error)],
+    };
+  }
+
+  const tracks: Track[] = [];
+  const playlists: Playlist[] = [];
+
+  await Promise.all((payload.items ?? []).slice(0, 8).map(async (playlist, index) => {
+    const itemsUrl = new URL("https://www.googleapis.com/youtube/v3/playlistItems");
+    itemsUrl.search = new URLSearchParams({
+      part: "snippet",
+      playlistId: playlist.id,
+      maxResults: "20",
+    }).toString();
+
+    try {
+      const itemsPayload = await fetchYouTubeJson<{ items?: YouTubePlaylistItem[] }>(itemsUrl, settings);
+      const playlistTracks = await hydrateYouTubeDurations(
+        (itemsPayload.items ?? [])
+          .map((item, trackIndex) => mapYouTubePlaylistTrack(item, playlist.snippet.title, trackIndex + index))
+          .filter(Boolean) as Track[],
+        settings,
+      );
+      if (!playlistTracks.length) return;
+      tracks.push(...playlistTracks);
+      playlists.push({
+        id: `youtube-playlist-${playlist.id}`,
+        title: stripHtml(playlist.snippet.title),
+        description: playlist.snippet.description || `${playlist.contentDetails?.itemCount ?? playlistTracks.length} YouTube videos`,
+        source: "youtube",
+        tracks: playlistTracks.map((track) => track.id),
+        cover: playlistCover("youtube", index),
+        thumbnail: playlist.snippet.thumbnails.high?.url ?? playlist.snippet.thumbnails.medium?.url ?? playlist.snippet.thumbnails.default?.url,
+      });
+    } catch {
+      // Individual private or unavailable playlists should not block the rest of the library.
+    }
   }));
 
   return { tracks, playlists, errors: [] as string[] };
@@ -471,6 +627,15 @@ export async function loadProviderLibrary(settings: SettingsState): Promise<Prov
     if (!collection || collection.tracks.length === 0) continue;
     tracks.push(...collection.tracks);
     playlists.push(collection.playlist);
+  }
+
+  const youtubeUserLibrary = await fetchYouTubeUserPlaylists(settings);
+  errors.push(...youtubeUserLibrary.errors);
+  tracks.push(...youtubeUserLibrary.tracks);
+  playlists.push(...youtubeUserLibrary.playlists);
+
+  if (hasYouTubeCredentials(settings) && !getYouTubeToken(settings)) {
+    errors.push("Your personal YouTube/YouTube Music playlists need a YouTube OAuth access token. API key only supports search/public data.");
   }
 
   const spotifyUserLibrary = await fetchSpotifyUserPlaylists(settings);

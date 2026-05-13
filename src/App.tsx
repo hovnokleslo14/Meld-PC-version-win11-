@@ -88,7 +88,9 @@ const makeProviderStatuses = (settings: SettingsState): ProviderStatuses => ({
   youtube: {
     configured: hasYouTubeCredentials(settings),
     status: hasYouTubeCredentials(settings) ? "ready" : "missing",
-    message: hasYouTubeCredentials(settings) ? "YouTube configured" : "Needs YouTube API key",
+    message: hasYouTubeCredentials(settings)
+      ? settings.youtubeAccessToken.trim() ? "YouTube OAuth ready" : "YouTube search ready"
+      : "Needs YouTube API key or OAuth token",
     tracks: 0,
     playlists: 0,
   },
@@ -160,7 +162,6 @@ function Cover({ track, className = "" }: { track: Track; className?: string }) 
 }
 
 function WindowControls() {
-  if (!isNeutralino()) return null;
   return (
     <div className="window-controls">
       <button className="window-control" aria-label="Minimize" onClick={desktopWindow.minimize}><Minimize2 size={15} /></button>
@@ -613,6 +614,7 @@ function SettingsView({
           <h2>YouTube Music Search</h2>
           <StatusBadge state={libraryLoading && providerStatus.youtube.configured ? "loading" : providerStatus.youtube.status} message={providerStatus.youtube.message} />
           <label>YouTube Data API key<input value={settings.youtubeApiKey} onChange={(event) => update("youtubeApiKey", event.target.value)} placeholder="AIza..." /></label>
+          <label>YouTube OAuth Access Token<input type="password" value={settings.youtubeAccessToken} onChange={(event) => update("youtubeAccessToken", event.target.value)} placeholder="Needed for your personal playlists" /></label>
           <div className="toggle-line"><span>Use YouTube in Search</span><input type="checkbox" checked={settings.youtubeForSearch} onChange={(event) => update("youtubeForSearch", event.target.checked)} /></div>
           <button className="secondary" onClick={() => openExternal("https://developers.google.com/youtube/v3/docs/search/list")}><ExternalLink size={18} />API docs</button>
         </div>
@@ -779,7 +781,7 @@ function PlayerBar({
         </div>
         <div className="progress-row">
           <span>{formatTime(position)}</span>
-          <input aria-label="Seek" type="range" min="0" max={safeDuration} value={Math.min(position, safeDuration)} disabled={!track?.audioUrl} onChange={(event) => seek(Number(event.target.value))} style={{ "--progress": `${progress}%` } as CSSProperties} />
+          <input aria-label="Seek" type="range" min="0" max={safeDuration} value={Math.min(position, safeDuration)} disabled={!track} onChange={(event) => seek(Number(event.target.value))} style={{ "--progress": `${progress}%` } as CSSProperties} />
           <span>{formatTime(safeDuration)}</span>
         </div>
       </div>
@@ -870,7 +872,7 @@ export default function App() {
         youtube: current.youtube.tracks || current.youtube.playlists ? { ...current.youtube, configured: next.youtube.configured } : next.youtube,
       };
     });
-  }, [settings.spotifyAccessToken, settings.spotifyClientId, settings.spotifyClientSecret, settings.spotifyForSearch, settings.youtubeApiKey, settings.youtubeForSearch]);
+  }, [settings.spotifyAccessToken, settings.spotifyClientId, settings.spotifyClientSecret, settings.spotifyForSearch, settings.youtubeAccessToken, settings.youtubeApiKey, settings.youtubeForSearch]);
 
   useEffect(() => {
     if (!settings.autoLoadLibrary || !hasAnyProviderCredentials(settings)) return;
@@ -882,7 +884,7 @@ export default function App() {
       void loadRealLibrary();
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [settings.autoLoadLibrary, settings.spotifyAccessToken, settings.spotifyClientId, settings.spotifyClientSecret, settings.spotifyForSearch, settings.youtubeApiKey, settings.youtubeForSearch]);
+  }, [settings.autoLoadLibrary, settings.spotifyAccessToken, settings.spotifyClientId, settings.spotifyClientSecret, settings.spotifyForSearch, settings.youtubeAccessToken, settings.youtubeApiKey, settings.youtubeForSearch]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

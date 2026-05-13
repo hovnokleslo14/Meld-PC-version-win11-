@@ -109,9 +109,13 @@ export function useAudioPlayer(initialQueue: Track[]) {
     const audioElement = audioRef.current;
     if (!audioElement) return;
     const safePosition = clamp(nextPosition, 0, duration || 0);
+    if (!currentTrack?.audioUrl) {
+      setPosition(safePosition);
+      return;
+    }
     audioElement.currentTime = safePosition;
     setPosition(safePosition);
-  }, [duration]);
+  }, [currentTrack?.audioUrl, duration]);
 
   const playAt = useCallback((index: number) => {
     const nextTrack = queue[index];
@@ -133,6 +137,27 @@ export function useAudioPlayer(initialQueue: Track[]) {
     if (!queue.length) return;
     playAt((currentIndex - 1 + queue.length) % queue.length);
   }, [currentIndex, playAt, queue.length]);
+
+  useEffect(() => {
+    if (!currentTrack || currentTrack.audioUrl || !isPlaying) return;
+
+    const timer = window.setInterval(() => {
+      setPosition((current) => {
+        const limit = currentTrack.duration || duration || 0;
+        const nextPosition = current + 1;
+        if (limit > 0 && nextPosition >= limit) {
+          if (repeat) {
+            return 0;
+          }
+          window.setTimeout(() => next(), 0);
+          return limit;
+        }
+        return limit > 0 ? Math.min(nextPosition, limit) : nextPosition;
+      });
+    }, 1000);
+
+    return () => window.clearInterval(timer);
+  }, [currentTrack, duration, isPlaying, next, repeat]);
 
   useEffect(() => {
     const audioElement = audioRef.current;
